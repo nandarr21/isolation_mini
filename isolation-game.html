@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Isolation Game</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', sans-serif; background: #0f1117; color: #e2e8f0; margin: 0; }
+  .cell-btn { transition: all 0.15s ease; }
+  .cell-btn:hover:not(:disabled) { transform: scale(1.06); }
+  .tree-node { transition: all 0.2s ease; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #1e2030; }
+  ::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 3px; }
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; }
+  .glow-blue { box-shadow: 0 0 12px rgba(59,130,246,0.35); }
+  .glow-orange { box-shadow: 0 0 12px rgba(251,146,60,0.35); }
+  .pulse { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+  @keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+  .slide-in { animation: slideIn 0.25s ease; }
+  .tree-svg text { font-family: 'JetBrains Mono', monospace; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useCallback, useRef, useEffect } = React;
+
+const N = 4;
+const EMPTY = 0, BLOCKED = 1, P1 = 2, P2 = 3;
+const DIRS = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+
+function initBoard() {
+  const b = Array(N).fill(null).map(() => Array(N).fill(EMPTY));
+  b[0][0] = P1;
+  b[N-1][N-1] = P2;
+  return b;
+}
+
+function findPlayer(board, player) {
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++)
+      if (board[r][c] === player) return [r, c];
+  return null;
+}
+
+function getLegalMoves(board, player) {
+  const pos = findPlayer(board, player);
+  if (!pos) return [];
+  const [pr, pc] = pos;
+  const moves = [];
+  for (const [dr, dc] of DIRS) {
+    const nr = pr + dr, nc = pc + dc;
+    if (nr >= 0 && nr < N && nc >= 0 && nc < N && board[nr][nc] === EMPTY)
+      moves.push([nr, nc]);
+  }
+  return moves;
+}
+
+function applyMove(board, player, [nr, nc]) {
+  const nb = board.map(r => [...r]);
+  const pos = findPlayer(nb, player);
+  if (pos) nb[pos[0]][pos[1]] = BLOCKED;
+  nb[nr][nc] = player;
+  return nb;
+}
+
+function heuristic(board, player) {
+  const opp = player === P1 ? P2 : P1;
+  return getLegalMoves(board, player).length - getLegalMoves(board, opp).length;
+}
+
+let nodeCount = 0;
+let abNodeCount = 0;
+
+function minimax(board, depth, isMax, player, maxPlayer, log, parentId = 'root', nodeIdRef = {v:0}) {
+  nodeCount++;
+  const myId = `n${nodeIdRef.v++}`;
+  const opp = player === P1 ? P2 : P1;
+  const moves = getLegalMoves(board, isMax ? player : opp);
+  const nodeInfo = { id: myId, parentId, depth, isMax, value: null, pruned: false, children: [] };
+  log.push(nodeInfo);
+
+  if (depth === 0 || moves.length === 0) {
+    const val = moves.length === 0
+      ? (isMax ? -100 : 100)
+      : heuristic(board, maxPlayer);
+    nodeInfo.value = val;
+    return { val, nodeId: myId };
+  }
+
+  let best = isMax ? -Infinity : Infinity;
+  for (const mv of moves) {
+    const nb = applyMove(board, isMax ? player : opp, mv);
+    const child = minimax(nb, depth - 1, !isMax, player, maxPlayer, log, myId, nodeIdRef);
+    nodeInfo.children.push(child.nodeId);
+    if (isMax) { if (child.val > best) best = child.val; }
+    else { if (child.val < best) best = child.val; }
+  }
+  nodeInfo.value = best;
+  return { val: best, nodeId: myId, bestMove: moves[0] };
+}
+
+function alphabeta(board, depth, alpha, beta, isMax, player, maxPlayer, log, parentId = 'root', nodeIdRef = {v:0}) {
+  abNodeCount++;
+  const myId = `a${nodeIdRef.v++}`;
+  const opp = player === P1 ? P2 : P1;
+  const moves = getLegalMoves(board, isMax ? player : opp);
+  const nodeInfo = { id: myId, parentId, depth, isMax, value: null, pruned: false, children: [], alpha, beta };
+  log.push(nodeInfo);
+
+  if (depth === 0 || moves.length === 0) {
+    const val = moves.length === 0
+      ? (isMax ? -100 : 100)
+      : heuristic(board, maxPlayer);
+    nodeInfo.value = val;
+    return { val, nodeId: myId };
+  }
+
+  let best = isMax ? -Infinity : Infinity;
+  let bestMove = null;
+  for (const mv of moves) {
+    const nb = applyMove(board, isMax ? player : opp, mv);
+    const child = alphabeta(nb, depth - 1, alpha, beta, !isMax, player, maxPlayer, log, myId, nodeIdRef);
+    nodeInfo.children.push(child.nodeId);
+    if (isMax) {
+      if (child.val > best) { best = child.val; bestMove = mv; }
+      alpha = Math.max(alpha, best);
+    } else {
+      if (child.val < best) { best = child.val; bestMove = mv; }
+      beta = Math.min(beta, best);
+    }
+    if (beta <= alpha) {
+      const remaining = moves.slice(moves.indexOf(mv) + 1);
+      remaining.forEach(() => { nodeInfo.pruned = true; });
+      break;
+    }
+  }
+  nodeInfo.value = best;
+  return { val: best, nodeId: myId, bestMove };
+}
+
+function getBestMove(board, player, depth, useAB) {
+  const moves = getLegalMoves(board, player);
+  if (moves.length === 0) return null;
+
+  const mmLog = [], abLog = [];
+  const mmRef = {v:0}, abRef = {v:0};
+
+  // Selalu jalankan Minimax murni untuk data perbandingan
+  nodeCount = 0;
+  let mmBestVal = -Infinity, mmBestMove = moves[0];
+  for (const mv of moves) {
+    const nb = applyMove(board, player, mv);
+    const { val } = minimax(nb, depth - 1, false, player, player, mmLog, 'root', mmRef);
+    if (val > mmBestVal) { mmBestVal = val; mmBestMove = mv; }
+  }
+  const savedMmNodes = nodeCount;
+
+  // Selalu jalankan Alpha-Beta untuk data perbandingan
+  abNodeCount = 0;
+  let abBestVal = -Infinity, abBestMove = moves[0];
+  let alpha = -Infinity, beta = Infinity;
+  for (const mv of moves) {
+    const nb = applyMove(board, player, mv);
+    const { val } = alphabeta(nb, depth - 1, alpha, beta, false, player, player, abLog, 'root', abRef);
+    if (val > abBestVal) { abBestVal = val; abBestMove = mv; alpha = Math.max(alpha, val); }
+  }
+
+  // Keputusan langkah berdasarkan algoritma yang dipilih user
+  const bestMove = useAB ? abBestMove : mmBestMove;
+
+  return { move: bestMove, mmLog, abLog, mmNodes: savedMmNodes, abNodes: abNodeCount };
+}
+
+function TreeViz({ log, title, color }) {
+  if (!log || log.length === 0) return null;
+  const byId = {};
+  log.forEach(n => byId[n.id] = n);
+  const roots = log.filter(n => n.parentId === 'root');
+  if (roots.length === 0) return null;
+
+  const NODE_R = 13, LEVEL_H = 64, MIN_SEP = 32;
+
+  // Hitung lebar subtree tiap node (jumlah leaf)
+  function countLeaves(id) {
+    const node = byId[id];
+    if (!node) return 1;
+    const ch = node.children || [];
+    if (ch.length === 0) return 1;
+    return ch.reduce((s, cid) => s + countLeaves(cid), 0);
+  }
+
+  // Layout: posisi x proporsional lebar subtree, y berdasarkan depth dari root
+  const positions = {};
+  function layout(id, xStart, xEnd, depth) {
+    const node = byId[id];
+    if (!node) return;
+    const cx = (xStart + xEnd) / 2;
+    const cy = depth * LEVEL_H + 40;
+    positions[id] = { cx, cy };
+    const children = node.children || [];
+    if (children.length === 0) return;
+    const totalLeaves = children.reduce((s, cid) => s + countLeaves(cid), 0);
+    let x = xStart;
+    children.forEach(cid => {
+      const leaves = countLeaves(cid);
+      const w = ((xEnd - xStart) * leaves) / totalLeaves;
+      layout(cid, x, x + w, depth + 1);
+      x += w;
+    });
+  }
+
+  // Hitung total leaves untuk menentukan lebar canvas
+  const totalLeaves = roots.reduce((s, n) => s + countLeaves(n.id), 0);
+  const W = Math.max(420, totalLeaves * MIN_SEP + 40);
+  const maxDepth = Math.max(...log.map(n => {
+    let d = 0, cur = n;
+    while (cur && cur.parentId !== 'root') {
+      cur = byId[cur.parentId]; d++;
+    }
+    return d;
+  }));
+
+  let xCursor = 20;
+  roots.forEach(n => {
+    const leaves = countLeaves(n.id);
+    const w = (W - 40) * leaves / totalLeaves;
+    layout(n.id, xCursor, xCursor + w, 0);
+    xCursor += w;
+  });
+
+  const svgH = (maxDepth + 2) * LEVEL_H + 40;
+
+  const edges = [];
+  log.forEach(node => {
+    if (node.parentId !== 'root' && positions[node.parentId] && positions[node.id]) {
+      const p = positions[node.parentId];
+      const c = positions[node.id];
+      edges.push({ x1: p.cx, y1: p.cy + NODE_R, x2: c.cx, y2: c.cy - NODE_R, pruned: node.pruned });
+    }
+  });
+
+  const visibleNodes = log.filter(n => positions[n.id]);
+
+  return (
+    <div className="mt-3">
+      <div className="text-xs font-semibold mb-1" style={{ color }}>{title}</div>
+      <div style={{ overflowX: 'auto', overflowY: 'hidden', borderRadius: 8, border: '1px solid #2d3748', background: '#0d1117' }}>
+        <svg width={W} height={svgH} className="tree-svg" style={{ display: 'block' }}>
+          {edges.map((e, i) => (
+            <line key={i} x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
+              stroke={e.pruned ? '#ef4444' : '#334155'}
+              strokeWidth={e.pruned ? 1.5 : 1}
+              strokeDasharray={e.pruned ? '4 3' : 'none'}
+              opacity={0.75}
+            />
+          ))}
+          {visibleNodes.map(node => {
+            const pos = positions[node.id];
+            if (!pos) return null;
+            const fill = node.pruned ? '#7f1d1d' :
+                         node.isMax ? '#1e3a5f' : '#1a2e1a';
+            const stroke = node.pruned ? '#ef4444' :
+                           node.isMax ? '#3b82f6' : '#22c55e';
+            const textFill = node.pruned ? '#fca5a5' :
+                             node.isMax ? '#93c5fd' : '#86efac';
+            return (
+              <g key={node.id} className="tree-node">
+                <circle cx={pos.cx} cy={pos.cy} r={NODE_R}
+                  fill={fill} stroke={stroke} strokeWidth={1.2} />
+                <text x={pos.cx} y={pos.cy + 1}
+                  textAnchor="middle" dominantBaseline="middle"
+                  fontSize="9" fill={textFill} fontWeight="500">
+                  {node.value !== null ? node.value : '?'}
+                </text>
+              </g>
+            );
+          })}
+          <text x="10" y={svgH - 8} fontSize="9" fill="#4a5568">
+            ■ MAX node  ■ MIN node  — pruned edge
+          </text>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function App() {
+  const [board, setBoard] = useState(initBoard());
+  const [turn, setTurn] = useState(P1);
+  const [status, setStatus] = useState('playing');
+  const [depth, setDepth] = useState(2);
+  const [useAB, setUseAB] = useState(true);
+  const [mmLog, setMmLog] = useState([]);
+  const [abLog, setAbLog] = useState([]);
+  const [mmNodes, setMmNodes] = useState(0);
+  const [abNodes, setAbNodes] = useState(0);
+  const [lastAIMove, setLastAIMove] = useState(null);
+  const [thinking, setThinking] = useState(false);
+  const [showTree, setShowTree] = useState(true);
+  const [highlight, setHighlight] = useState([]);
+  const [log, setLog] = useState([]);
+  const aiRef = useRef(false);
+  const [gameMode, setGameMode] = useState('hvai');
+
+  const legalMoves = getLegalMoves(board, turn);
+
+  useEffect(() => {
+    if (status !== 'playing') return;
+    if (turn === P2 && gameMode === 'hvai' && !aiRef.current) {
+      aiRef.current = true;
+      setThinking(true);
+      setTimeout(() => {
+        const result = getBestMove(board, P2, depth, useAB);
+        if (!result || !result.move) {
+          setStatus('p1win');
+          setThinking(false); aiRef.current = false; return;
+        }
+        const nb = applyMove(board, P2, result.move);
+        setBoard(nb);
+        setLastAIMove(result.move);
+        setMmLog(result.mmLog || []);
+        setAbLog(result.abLog || []);
+        setMmNodes(result.mmNodes);
+        setAbNodes(result.abNodes);
+        setHighlight([result.move]);
+        const msg = `Pemain 2 (AI) bergerak ke [${result.move[0]},${result.move[1]}] — ${useAB ? result.abNodes : result.mmNodes} node dievaluasi`;
+        setLog(l => [msg, ...l.slice(0, 9)]);
+        const nextMoves = getLegalMoves(nb, P1);
+        if (nextMoves.length === 0) { setStatus('p2win'); setThinking(false); aiRef.current = false; return; }
+        setTurn(P1);
+        setThinking(false); aiRef.current = false;
+      }, 50);
+    }
+  }, [turn, board, status, depth, useAB, gameMode]);
+
+  function handleCellClick(r, c) {
+    if (status !== 'playing' || thinking) return;
+    if (gameMode === 'hvai' && turn !== P1) return;
+    const isLegal = legalMoves.some(([lr,lc]) => lr===r && lc===c);
+    if (!isLegal) return;
+    const nb = applyMove(board, turn, [r, c]);
+    setBoard(nb);
+    setHighlight([[r,c]]);
+    setLog(l => [`Pemain ${turn===P1?'1':'2'} bergerak ke [${r},${c}]`, ...l.slice(0,9)]);
+
+    const nextPlayer = turn === P1 ? P2 : P1;
+    const nextMoves = getLegalMoves(nb, nextPlayer);
+    if (nextMoves.length === 0) {
+      setStatus(turn === P1 ? 'p1win' : 'p2win');
+      return;
+    }
+    setTurn(nextPlayer);
+
+    if (gameMode === 'hvh') {
+      setTimeout(() => {
+        const mmL = [], abL = [], mmRef = {v:0}, abRef = {v:0};
+        nodeCount = 0; abNodeCount = 0;
+        const moves2 = getLegalMoves(nb, nextPlayer);
+        moves2.forEach(mv => {
+          const nb2 = applyMove(nb, nextPlayer, mv);
+          minimax(nb2, depth - 1, false, nextPlayer, nextPlayer, mmL, 'root', mmRef);
+        });
+        const savedMM = nodeCount;
+        nodeCount = 0; abNodeCount = 0;
+        moves2.forEach(mv => {
+          const nb2 = applyMove(nb, nextPlayer, mv);
+          alphabeta(nb2, depth - 1, -Infinity, Infinity, false, nextPlayer, nextPlayer, abL, 'root', abRef);
+        });
+        setMmLog(mmL); setAbLog(abL);
+        setMmNodes(savedMM); setAbNodes(abNodeCount);
+      }, 0);
+    } else {
+      setMmLog([]); setAbLog([]);
+    }
+  }
+
+  function resetGame() {
+    setBoard(initBoard());
+    setTurn(P1);
+    setStatus('playing');
+    setLastAIMove(null);
+    setMmLog([]); setAbLog([]);
+    setMmNodes(0); setAbNodes(0);
+    setHighlight([]);
+    setLog([]);
+    aiRef.current = false;
+    setThinking(false);
+  }
+
+  function getCellStyle(r, c, val) {
+    const isHighlight = highlight.some(([hr,hc]) => hr===r && hc===c);
+    const isLegal = status === 'playing' && legalMoves.some(([lr,lc]) => lr===r && lc===c);
+    if (val === BLOCKED) return { background: '#1a1a2e', cursor: 'default', border: '1px solid #2d2d4a' };
+    if (val === P1) return { background: '#1e3a5f', border: '2px solid #3b82f6', boxShadow: isHighlight ? '0 0 10px #3b82f6' : 'none' };
+    if (val === P2) return { background: '#3b1f1f', border: '2px solid #f97316', boxShadow: isHighlight ? '0 0 10px #f97316' : 'none' };
+    if (isLegal) return { background: '#1a3320', border: '1.5px dashed #22c55e', cursor: 'pointer' };
+    return { background: '#16213e', border: '1px solid #2d3748', cursor: 'default' };
+  }
+
+  const pruned = useAB && abLog.length > 0 ? abLog.filter(n=>n.pruned).length : 0;
+  const prunePct = mmNodes > 0 && abNodes > 0
+    ? Math.round((1 - abNodes / mmNodes) * 100) : 0;
+
+  return (
+    <div style={{ minHeight: '100vh', padding: '20px', background: '#0f1117' }}>
+      <div style={{ maxWidth: 900, margin: '0 auto' }}>
+        {/* Header */}
+        <div className="mb-6">
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#e2e8f0', margin: 0, letterSpacing: '-0.02em' }}>
+            Isolation Game <span style={{ color: '#3b82f6' }}>4×4</span>
+          </h1>
+          <p style={{ color: '#64748b', fontSize: 13, marginTop: 4 }}>
+            Minimax &amp; Alpha-Beta Pruning · Kecerdasan Buatan
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+          {/* LEFT PANEL */}
+          <div style={{ flex: '0 0 auto' }}>
+            {/* Status Banner */}
+            {status !== 'playing' && (
+              <div className="slide-in mb-4 rounded-xl p-4 text-center" style={{
+                background: status === 'p1win' ? '#1e3a5f' : '#3b1f1f',
+                border: `2px solid ${status === 'p1win' ? '#3b82f6' : '#f97316'}`
+              }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: status === 'p1win' ? '#93c5fd' : '#fdba74' }}>
+                  {status === 'p1win' ? '🎉 Pemain 1 Menang!' : `🎉 Pemain 2 Menang!`}
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+                  {status === 'p1win' ? 'Pemain 2 tidak bisa bergerak lagi' : 'Pemain 1 tidak bisa bergerak lagi'}
+                </div>
+              </div>
+            )}
+
+            {/* Board */}
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${N}, 72px)`, gap: 5, marginBottom: 16 }}>
+              {board.map((row, r) => row.map((cell, c) => (
+                <button key={`${r}-${c}`}
+                  onClick={() => handleCellClick(r, c)}
+                  disabled={status !== 'playing' || (gameMode==='hvai' && turn===P2)}
+                  className="cell-btn rounded-xl flex items-center justify-center"
+                  style={{ width: 72, height: 72, border: 'none', fontSize: 22, fontWeight: 700, transition: 'all 0.15s', ...getCellStyle(r, c, cell) }}>
+                  {cell === P1 && <span title="Pemain 1">🔵</span>}
+                  {cell === P2 && <span title={gameMode==='hvai' ? 'AI' : 'Pemain 2'}>🟠</span>}
+                  {cell === BLOCKED && <span style={{ fontSize: 16, opacity: 0.4 }}>✕</span>}
+                  {cell === EMPTY && legalMoves.some(([lr,lc])=>lr===r&&lc===c) && (
+                    <span style={{ fontSize: 10, color: '#22c55e', opacity: 0.7 }}>●</span>
+                  )}
+                </button>
+              )))}
+            </div>
+
+            {/* Turn indicator */}
+            {status === 'playing' && (
+              <div className="flex items-center gap-2 mb-4 rounded-lg px-3 py-2" style={{ background: '#1e2030' }}>
+                {thinking ? (
+                  <><span className="pulse" style={{ color: '#f97316' }}>●</span>
+                  <span style={{ fontSize: 12, color: '#94a3b8' }}>AI sedang berpikir...</span></>
+                ) : (
+                  <><span style={{ color: turn === P1 ? '#3b82f6' : '#f97316' }}>●</span>
+                  <span style={{ fontSize: 12, color: '#94a3b8' }}>Giliran: <strong style={{ color: turn===P1?'#93c5fd':'#fdba74' }}>{turn===P1?'Pemain 1': gameMode==='hvai' ? 'AI' : 'Pemain 2'}</strong></span>
+                  {gameMode === 'hvh' && <span style={{fontSize:11,color:'#64748b'}}>— klik sel hijau untuk bergerak</span>}</>
+                )}
+              </div>
+            )}
+
+            {/* Controls */}
+            <div className="rounded-xl p-4 mb-4" style={{ background: '#1e2030', border: '1px solid #2d3748' }}>
+              <div className="mb-3">
+                <label style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  Mode Permainan
+                </label>
+                <div className="flex gap-2 mt-1">
+                  {['hvai','hvh'].map(m => (
+                    <button key={m} onClick={() => { setGameMode(m); resetGame(); }}
+                      style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid',
+                        background: gameMode===m ? '#1d4ed8' : 'transparent',
+                        borderColor: gameMode===m ? '#3b82f6' : '#374151',
+                        color: gameMode===m ? '#bfdbfe' : '#6b7280', cursor: 'pointer' }}>
+                      {m === 'hvai' ? 'Human vs AI' : 'Human vs Human'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-3">
+                <label style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  Algoritma AI
+                </label>
+                <div className="flex gap-2 mt-1">
+                  {[false, true].map(ab => (
+                    <button key={String(ab)} onClick={() => setUseAB(ab)}
+                      style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid',
+                        background: useAB===ab ? '#164e63' : 'transparent',
+                        borderColor: useAB===ab ? '#06b6d4' : '#374151',
+                        color: useAB===ab ? '#a5f3fc' : '#6b7280', cursor: 'pointer' }}>
+                      {ab ? 'Minimax + α-β' : 'Minimax Murni'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  Kedalaman Pencarian: <span style={{ color: '#e2e8f0' }}>{depth}</span>
+                </label>
+                <input type="range" min={1} max={4} value={depth} step={1}
+                  onChange={e => setDepth(Number(e.target.value))}
+                  style={{ width: '100%', marginTop: 6, accentColor: '#3b82f6' }} />
+                <div className="flex justify-between" style={{ fontSize: 10, color: '#4a5568' }}>
+                  <span>1 (cepat)</span><span>2</span><span>3</span><span>4 (dalam)</span>
+                </div>
+              </div>
+            </div>
+
+            <button onClick={resetGame} style={{
+              width: '100%', padding: '10px', borderRadius: 10, border: '1px solid #374151',
+              background: '#1e2030', color: '#94a3b8', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              transition: 'all 0.15s'
+            }} onMouseOver={e=>e.target.style.borderColor='#4b5563'}
+               onMouseOut={e=>e.target.style.borderColor='#374151'}>
+              ↺ Reset Game
+            </button>
+          </div>
+
+          {/* RIGHT PANEL */}
+          <div style={{ flex: 1, minWidth: 280 }}>
+            {/* Stats */}
+            {gameMode === 'hvai' && <div className="rounded-xl p-4 mb-4" style={{ background: '#1e2030', border: '1px solid #2d3748' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 10 }}>
+                Statistik Node
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div className="rounded-lg p-3" style={{ background: '#0f1729', border: '1px solid #1e3a5f' }}>
+                  <div style={{ fontSize: 10, color: '#3b82f6', fontWeight: 600, marginBottom: 2 }}>MINIMAX</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: '#93c5fd', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {mmNodes || '—'}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#4a5568' }}>node dievaluasi</div>
+                </div>
+                <div className="rounded-lg p-3" style={{ background: '#0a1f0f', border: '1px solid #166534' }}>
+                  <div style={{ fontSize: 10, color: '#22c55e', fontWeight: 600, marginBottom: 2 }}>ALPHA-BETA</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: '#86efac', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {abNodes || '—'}
+                  </div>
+                  <div style={{ fontSize: 10, color: '#4a5568' }}>node dievaluasi</div>
+                </div>
+              </div>
+              {mmNodes > 0 && abNodes > 0 && (
+                <div className="mt-3 rounded-lg p-2 text-center slide-in" style={{ background: '#0a1f1a', border: '1px solid #115e59' }}>
+                  <span style={{ fontSize: 12, color: '#2dd4bf' }}>
+                    Alpha-Beta memangkas <strong>{prunePct}%</strong> node lebih sedikit
+                  </span>
+                </div>
+              )}
+            </div>}
+
+            {/* Legenda */}
+            <div className="rounded-xl p-4 mb-4" style={{ background: '#1e2030', border: '1px solid #2d3748' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
+                Legenda Board
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {[
+                  ['🔵', '#93c5fd', 'Pemain 1 (kamu)'],
+                  ['🟠', '#fdba74', gameMode==='hvai' ? 'Pemain 2 / AI' : 'Pemain 2'],
+                  ['✕', '#4a5568', 'Sel terblokir'],
+                  ['●', '#22c55e', 'Langkah valid'],
+                ].map(([icon, color, label]) => (
+                  <div key={label} className="flex items-center gap-2">
+                    <span style={{ fontSize: 14, width: 20, textAlign: 'center' }}>{icon}</span>
+                    <span style={{ fontSize: 12, color }}>{label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Move Log */}
+            <div className="rounded-xl p-4 mb-4" style={{ background: '#1e2030', border: '1px solid #2d3748' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
+                Log Pergerakan
+              </div>
+              <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+                {log.length === 0 ? (
+                  <div style={{ fontSize: 12, color: '#374151' }}>Belum ada pergerakan</div>
+                ) : log.map((l, i) => (
+                  <div key={i} style={{ fontSize: 11, color: i===0?'#e2e8f0':'#64748b', fontFamily: 'JetBrains Mono', padding: '2px 0',
+                    borderBottom: '1px solid #1e2030' }}>
+                    {i===0 && <span style={{ color: '#22c55e' }}>▶ </span>}{l}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Aturan */}
+            <div className="rounded-xl p-4" style={{ background: '#1e2030', border: '1px solid #2d3748' }}>
+              <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>
+                Cara Bermain
+              </div>
+              <ol style={{ fontSize: 12, color: '#94a3b8', paddingLeft: 16, lineHeight: 1.8, margin: 0 }}>
+                <li>Tiap giliran, pindahkan pion ke sel kosong adjacent (8 arah)</li>
+                <li>Sel yang ditinggalkan <strong style={{color:'#e2e8f0'}}>terblokir</strong> permanen</li>
+                <li>Pemain yang tidak bisa bergerak <strong style={{color:'#f87171'}}>kalah</strong></li>
+                <li>{gameMode==='hvai' ? 'AI' : 'Pemain 2'} menggunakan {useAB ? 'Minimax + Alpha-Beta' : 'Minimax murni'} depth={depth}</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        {/* Game Tree Visualization */}
+        {gameMode === 'hvai' && <div className="mt-6 rounded-xl p-4" style={{ background: '#1e2030', border: '1px solid #2d3748' }}>
+          <div className="flex items-center justify-between mb-1">
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>Visualisasi Game Tree</span>
+              <span style={{ fontSize: 11, color: '#64748b', marginLeft: 8 }}>
+                (ditampilkan setelah {gameMode==='hvai'?'AI':'Pemain 2'} bergerak · maks depth {depth})
+              </span>
+            </div>
+            <button onClick={() => setShowTree(v => !v)}
+              style={{ fontSize: 11, color: '#64748b', background: 'none', border: 'none', cursor: 'pointer' }}>
+              {showTree ? '▲ Sembunyikan' : '▼ Tampilkan'}
+            </button>
+          </div>
+
+          {showTree && (
+            <div>
+              <div className="flex gap-3 mb-3 text-xs" style={{ color: '#64748b' }}>
+                <span><span style={{ color: '#3b82f6' }}>■</span> MAX node ({gameMode==='hvai'?'AI':'Pemain 2'} memaksimalkan)</span>
+                <span><span style={{ color: '#22c55e' }}>■</span> MIN node (lawan meminimalkan)</span>
+                <span><span style={{ color: '#ef4444' }}>- -</span> Edge dipangkas (α-β)</span>
+              </div>
+              {mmLog.length === 0 && abLog.length === 0 ? (
+                <div style={{ fontSize: 12, color: '#374151', fontStyle: 'italic', padding: '20px 0', textAlign: 'center' }}>
+                  Lakukan langkah pertama untuk melihat game tree {gameMode==='hvai'?'AI':'Pemain 2'}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  <TreeViz log={mmLog} title={`Minimax (${mmNodes} node)`} color="#3b82f6" />
+                  <TreeViz log={abLog} title={`Alpha-Beta (${abNodes} node)`} color="#22c55e" />
+                </div>
+              )}
+            </div>
+          )}
+        </div>}
+
+        {/* Comparison Table */}
+        {gameMode === 'hvai' && mmNodes > 0 && abNodes > 0 && (
+          <div className="mt-4 rounded-xl p-4 slide-in" style={{ background: '#1e2030', border: '1px solid #2d3748' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', marginBottom: 10 }}>
+              Perbandingan Performa 
+            </div>
+            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid #2d3748' }}>
+                  {['Algoritma','Nodes Dievaluasi','Nodes Dipangkas','Efisiensi'].map(h => (
+                    <th key={h} style={{ padding: '6px 8px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 11 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderBottom: '1px solid #1e2030' }}>
+                  <td style={{ padding: '6px 8px', color: '#93c5fd', fontWeight: 600 }}>Minimax</td>
+                  <td style={{ padding: '6px 8px', color: '#e2e8f0', fontFamily: 'JetBrains Mono' }}>{mmNodes}</td>
+                  <td style={{ padding: '6px 8px', color: '#64748b' }}>—</td>
+                  <td style={{ padding: '6px 8px', color: '#64748b' }}>Baseline</td>
+                </tr>
+                <tr>
+                  <td style={{ padding: '6px 8px', color: '#86efac', fontWeight: 600 }}>Alpha-Beta</td>
+                  <td style={{ padding: '6px 8px', color: '#e2e8f0', fontFamily: 'JetBrains Mono' }}>{abNodes}</td>
+                  <td style={{ padding: '6px 8px', color: '#fbbf24', fontFamily: 'JetBrains Mono' }}>{mmNodes - abNodes}</td>
+                  <td style={{ padding: '6px 8px' }}>
+                    <span style={{ color: '#22c55e', fontWeight: 700 }}>{prunePct}% lebih hemat</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div style={{ textAlign: 'center', marginTop: 24, fontSize: 11, color: '#374151' }}>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
