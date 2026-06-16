@@ -2,8 +2,8 @@
 
 Simulasi permainan **Isolation** berbasis web yang mengimplementasikan algoritma **Minimax** dan **Alpha-Beta Pruning** dari nol. Dibuat sebagai project mata kuliah Kecerdasan Buatan, S1 Teknik Informatika.
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-my.id-blue?style=flat-square)](https://[domain-kamu].my.id)
-[![GitHub](https://img.shields.io/badge/Repository-Public-green?style=flat-square)](https://github.com/[username]/adversarial-search-[nama-atau-nim])
+[![Live Demo](https://isolation.my.id/)
+
 
 ---
 
