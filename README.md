@@ -56,10 +56,10 @@ Tidak memerlukan instalasi atau build tool apapun — cukup buka file HTML langs
 
 ```bash
 # Clone repository
-git clone https://github.com/[username]/adversarial-search-[nama-atau-nim].git
+git clone https://github.com/nandarr21/adversarial-search-isolation_mini.git
 
 # Masuk ke direktori
-cd adversarial-search-[nama-atau-nim]
+cd adversarial-search-isolation_mini
 
 # Buka di browser (pilih salah satu)
 # Windows:
